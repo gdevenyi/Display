@@ -20,6 +20,10 @@
 
 #include  <display.h>
 
+#if GIFTI_FOUND
+#include "gifti_io.h"
+#endif /* GIFTI_FOUND */
+
 /**
  * Load either a graphical object (MNI .obj format, e.g.) or a volume file
  * (MINC voxel data, e.g.).
@@ -95,6 +99,60 @@
             }
         }
     }
+#if GIFTI_FOUND
+    else if( filename_extension_matches(filename,"gii") )
+    {
+        gifti_image *gifti_ptr = gifti_read_image(filename, 1);
+        if (gifti_ptr != NULL)
+        {
+          if (gifti_ptr->numDA == 2 &&
+              gifti_ptr->darray[0]->intent == NIFTI_INTENT_POINTSET &&
+              gifti_ptr->darray[1]->intent == NIFTI_INTENT_TRIANGLE)
+          {
+            object_struct *object = create_object(POLYGONS);
+            polygons_struct *polygons = get_polygons_ptr(object);
+            float *point_data;
+            int *index_data;
+            int i;
+
+            initialize_polygons(polygons, WHITE, NULL);
+
+            polygons->n_points = gifti_ptr->darray[0]->dims[0];
+            polygons->points = malloc(sizeof(VIO_Point) * polygons->n_points);
+            point_data = (float *) gifti_ptr->darray[0]->data;
+            for_less( i, 0, polygons->n_points )
+            {
+              fill_Point(polygons->points[i], 
+                         point_data[i * 3 + 0],
+                         point_data[i * 3 + 1],
+                         point_data[i * 3 + 2]);
+            }
+
+            polygons->n_items = gifti_ptr->darray[1]->dims[0];
+            polygons->indices = malloc(sizeof(int) * polygons->n_items * 3);
+            polygons->end_indices = malloc(sizeof(int) * polygons->n_items);
+            index_data = (int *) gifti_ptr->darray[1]->data;
+            for_less( i, 0, polygons->n_items * 3 )
+            {
+              polygons->indices[i] = index_data[i];
+            }
+            for_less( i, 0, polygons->n_items )
+            {
+              polygons->end_indices[i] = (i + 1) * 3;
+            }
+
+            polygons->normals = malloc(sizeof(VIO_Vector) * polygons->n_points);
+            compute_polygon_normals( polygons );
+            add_object_to_model( model, object );
+          }
+          else
+          {
+            print("Sorry, I can only read GIfTI surfaces.\n");
+          }
+          gifti_free_image( gifti_ptr );
+        }
+    }
+#endif /* GIFTI_FOUND */
     else if( filename_extension_matches(filename,"cnt") )
     {
         print( "Cannot read .cnt files.\n" );

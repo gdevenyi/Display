@@ -89,4 +89,6 @@
 /* Define to 1 if the X Window System is missing or not being used. */
 #cmakedefine X_DISPLAY_MISSING 1
 
+#cmakedefine GIFTI_FOUND 1
+
 #endif // CONFIG_H
