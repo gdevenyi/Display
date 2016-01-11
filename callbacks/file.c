@@ -239,6 +239,18 @@ DEF_MENU_FUNCTION( save_file )
                     status = VIO_ERROR;
                 }
             }
+            else if (string_ends_in(filename, ".gii"))
+            {
+                if (n_objects == 1 && object_list[0]->object_type == POLYGONS)
+                {
+                    status = output_gifti(filename, object_list[0]);
+                }
+                else
+                {
+                    print("Can only write a single polygonal surface to a GIFTI file.\n");
+                    status = VIO_ERROR;
+                }
+            }
             else
             {
                 status = output_graphics_file( filename, 

@@ -15,6 +15,10 @@
 
 #include <display.h>
 
+#if GIFTI_FOUND
+#include <time.h>
+#include "gifti_io.h"
+#endif /* GIFTI_FOUND */
 /**
  * Write a Wavefront .obj file in ASCII format, given a memory representation
  * of an MNI polygonal surface.
@@ -259,3 +263,139 @@ output_x3d(VIO_STR filename, object_struct *object_ptr)
     return VIO_OK;
 }
 
+#if GIFTI_FOUND
+/**
+ * Write a GIFTI format file for a surface. The GIfTI format allows for
+ * the creation of a wide range of possible structures, but we are only
+ * interested in the "Surface" file, which represents a triangular mesh.
+ * This type of file does not represent colours or vertex values, although
+ * other GIFTI file types can separately represent those things.
+ *
+ * \param filename The name of the file to create.
+ * \param object_ptr A pointer to a single polygonal object.
+ * \returns VIO_OK if the operation succeeded.
+ */
+VIO_Status
+output_gifti(VIO_STR filename, object_struct *object_ptr)
+{
+    polygons_struct *polygons_ptr = get_polygons_ptr( object_ptr );
+    gifti_image *gifti_ptr;
+    int n;
+    int i;
+    float *point_data;
+    int *index_data;
+    time_t t;
+    char time_str[128];
+
+    /* Check that this is in fact a triangular mesh. Give up and 
+     * indicate failure if not.
+     */
+    n = 0;
+    for (i = 0; i < polygons_ptr->n_items; i++)
+    {
+        if (polygons_ptr->end_indices[i] - n != 3)
+        {
+            return VIO_ERROR;
+        }
+        n = polygons_ptr->end_indices[i];
+    }
+
+    /* Create the skeleton of the GIFTI image. This does not fill in any
+     * of the details. We have to do that ourselves in the current 
+     * version of the API.
+     */
+    gifti_ptr = gifti_create_image( 0, 0, 0, 0, NULL, 0);
+    if (gifti_ptr == NULL)
+    {
+        return VIO_ERROR;
+    }
+
+    /* Add some potentially useful metadata to the file.
+     */
+    if ( gifti_add_to_meta( &gifti_ptr->meta, "MNI-Display-Version",
+                            PACKAGE_VERSION , 0 ))
+    {
+        return VIO_ERROR;
+    }
+
+    t = time(NULL);
+    strftime(time_str, sizeof(time_str) - 1, "%F %T", localtime(&t));
+    if ( gifti_add_to_meta( &gifti_ptr->meta, "Date", time_str, 0))
+    {
+        return VIO_ERROR;
+    }
+
+    /* Now start setting up the data arrays that will represent the
+     * actual surface data. The surface file format requires two 
+     * data arrays, one for the points and another for the triangle
+     * indices. They have to be in the right order.
+     */
+    if ( gifti_add_empty_darray(gifti_ptr, 2) )
+    {
+        return VIO_ERROR;
+    }
+
+    /* Fill in the data array for the points. */
+    n = 0;
+    gifti_set_DA_defaults(gifti_ptr->darray[n]);
+    gifti_set_atr_in_DAs(gifti_ptr, "Intent", "NIFTI_INTENT_POINTSET", &n, 1);
+    gifti_set_atr_in_DAs(gifti_ptr, "DataType", "NIFTI_TYPE_FLOAT32", &n, 1);
+    gifti_ptr->darray[n]->num_dim = 2;
+    gifti_ptr->darray[n]->dims[0] = polygons_ptr->n_points;
+    gifti_ptr->darray[n]->dims[1] = 3;
+
+    /* Fill in the data array for the indices. */
+    n = 1;
+    gifti_set_DA_defaults(gifti_ptr->darray[n]);
+    gifti_set_atr_in_DAs(gifti_ptr, "Intent", "NIFTI_INTENT_TRIANGLE", &n, 1);
+    gifti_set_atr_in_DAs(gifti_ptr, "DataType", "NIFTI_TYPE_INT32", &n, 1);
+    gifti_ptr->darray[n]->num_dim = 2;
+    gifti_ptr->darray[n]->dims[0] = polygons_ptr->n_items;
+    gifti_ptr->darray[n]->dims[1] = 3;
+
+    /* Now we need to update the number of bytes per item in the 
+     * structure.
+     */
+    if (gifti_update_nbyper(gifti_ptr))
+    {
+        return VIO_ERROR;
+    }
+
+    /* And then update the number of values in the structure.
+     */
+    gifti_ptr->darray[0]->nvals = gifti_darray_nvals(gifti_ptr->darray[0]);
+    gifti_ptr->darray[1]->nvals = gifti_darray_nvals(gifti_ptr->darray[1]);
+
+    /* Now allocate the data we will need to store the actual data points.
+     */
+    if (gifti_alloc_DA_data(gifti_ptr, NULL, 0))
+    {
+        return VIO_ERROR;
+    }
+
+    /* Copy the points to the first data array. */
+    point_data = (float *) gifti_ptr->darray[0]->data;
+    for_less( i, 0, polygons_ptr->n_points )
+    {
+        point_data[i * 3 + 0] = Point_x(polygons_ptr->points[i]);
+        point_data[i * 3 + 1] = Point_y(polygons_ptr->points[i]);
+        point_data[i * 3 + 2] = Point_z(polygons_ptr->points[i]);
+    }
+
+    /* Copy the indices to the second data array. */
+    index_data = (int *) gifti_ptr->darray[1]->data;
+    for_less( i, 0, polygons_ptr->n_items * 3)
+    {
+        index_data[i] = polygons_ptr->indices[i];
+    }
+
+    /* Actually write the file. */
+    gifti_write_image(gifti_ptr, filename, 1);
+
+    /* Finally free the memory we allocated. */
+    gifti_free_image(gifti_ptr);
+
+    return VIO_OK;
+}
+
+#endif /* GIFTI_FOUND */
